@@ -430,6 +430,7 @@ struct AVCallUI: View {
                 .shadow(radius: size7px)
         }
         .buttonStyle(BorderlessButtonStyle())
+        .contentShape(Rectangle())
         .accessibilityLabel(Text("Answer call"))
     }
     
@@ -447,6 +448,7 @@ struct AVCallUI: View {
                 .shadow(radius: size7px)
         }
         .buttonStyle(BorderlessButtonStyle())
+        .contentShape(Rectangle())
         .accessibilityLabel(Text("End call"))
     }
     
@@ -503,10 +505,17 @@ struct AVCallUI: View {
         ZStack {
             Color.background
                 .ignoresSafeArea()
+                .contentShape(Rectangle())
+                .onTapGesture {
+                    controlsVisible.toggle()
+                }
             
             if MLCallType(rawValue:call.callType) == .video && MLCallState(rawValue:call.state) == .connected {
                 VideoView(renderer:self.remoteRenderer)
                     .ignoresSafeArea()
+                    .onTapGesture {
+                        controlsVisible.toggle()
+                    }
                 
                 DraggablePiPVideoView(
                     videoView: self.localRenderer,
@@ -750,9 +759,6 @@ struct AVCallUI: View {
                 }
             }
         }
-        }
-        .onTapGesture(count: 1) {
-            controlsVisible = !controlsVisible
         }
         .alert(isPresented: $showMicAlert) {
             Alert(

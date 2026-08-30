@@ -165,6 +165,9 @@ void swizzle(Class c, SEL orig, SEL new);
 +(NSString*) encodeRandomResource;
 +(NSUUID*) deviceUUID;
 +(BOOL) deviceUUIDAccessibleOrAllowedEmpty:(BOOL) allowed;
++(BOOL) storeAccountPassword:(NSString*) password forAccountID:(NSNumber*) accountID;
++(NSString* _Nullable) loadAccountPasswordForAccountID:(NSNumber*) accountID error:(NSError* _Nullable * _Nullable) error;
++(void) removeAccountPasswordForAccountID:(NSNumber*) accountID;
 
 +(NSData* _Nullable) sha1:(NSData* _Nullable) data;
 +(NSString* _Nullable) stringSha1:(NSString* _Nullable) data;

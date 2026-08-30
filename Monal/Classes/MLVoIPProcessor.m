@@ -179,6 +179,13 @@ static NSMutableDictionary* _pendingCalls;
     DDLogInfo(@"Initiating %@ call to %@: %@", (callType==MLCallTypeAudio ? @"audio" : @"video"), contact, call);
     [self addCall:call];
     
+#if TARGET_OS_MACCATALYST
+    // CallKit start transactions are unentitled / ignored on Mac Catalyst, so the
+    // remote would never receive a JMI propose if we waited for performStartCallAction.
+    DDLogInfo(@"Starting outgoing call without CallKit on macOS: %@", call);
+    [call sendJmiPropose];
+    [self initWebRTCForPendingCall:call];
+#else
     CXHandle* handle = [[CXHandle alloc] initWithType:CXHandleTypeGeneric value:contact.contactJid];
     CXStartCallAction* startCallAction = [[CXStartCallAction alloc] initWithCallUUID:call.uuid handle:handle];
     startCallAction.contactIdentifier = call.contact.contactDisplayName;
@@ -193,6 +200,7 @@ static NSMutableDictionary* _pendingCalls;
         else
             DDLogInfo(@"Successfully created outgoing call transaction for CallKit..");
     }];
+#endif
     return call;
 }
 
