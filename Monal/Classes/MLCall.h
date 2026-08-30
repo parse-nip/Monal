@@ -80,6 +80,7 @@ typedef NS_ENUM(NSUInteger, MLCallEncryptionState) {
 @property (nonatomic, readonly) BOOL canSendDtmf;
 
 +(instancetype) makeDummyCall:(int) type;
+-(void) answer;
 -(void) end;
 
 //these will not use the correct RTCVideoRenderer protocol like in the implementation because the forward declaration of

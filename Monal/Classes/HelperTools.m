@@ -937,20 +937,14 @@ static void notification_center_logging(CFNotificationCenterRef center, void* ob
 
 +(BOOL) shouldProvideVoip
 {
-    BOOL shouldProvideVoip = NO;
-#if TARGET_OS_MACCATALYST
-#ifdef IS_ALPHA
-    shouldProvideVoip = YES;
-#endif
-#else
+    // Audio/video calls are supported on iOS and Mac Catalyst.
+    // Quicksy disables calling in China to comply with local regulations.
 #ifdef IS_QUICKSY
     NSLocale* userLocale = [NSLocale currentLocale];
-    shouldProvideVoip = !([userLocale.countryCode containsString: @"CN"] || [userLocale.countryCode containsString: @"CHN"]);
+    return !([userLocale.countryCode containsString: @"CN"] || [userLocale.countryCode containsString: @"CHN"]);
 #else
-    shouldProvideVoip = YES;
+    return YES;
 #endif
-#endif
-    return shouldProvideVoip;
 }
     
 +(BOOL) isSandboxAPNS

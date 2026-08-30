@@ -79,7 +79,7 @@
 		<true/>
 	</dict>
 	<key>NSCameraUsageDescription</key>
-	<string>Quicksy allows users to take photos and upload to a conversation</string>
+	<string>Quicksy uses the camera to take photos for conversations and for video calls.</string>
 	<key>NSLocationUsageDescription</key>
 	<string>Quicksy uses your location when you send a location message in a conversation.</string>
 	<key>NSLocationWhenInUseUsageDescription</key>

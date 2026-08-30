@@ -198,6 +198,38 @@
     [self.webRTCClient showVideo];
 }
 
+-(void) answer
+{
+    if(self.direction != MLCallDirectionIncoming)
+    {
+        DDLogError(@"Cannot answer an outgoing call: %@", [self short]);
+        return;
+    }
+    if(self.isFinished)
+    {
+        DDLogInfo(@"Not answering: call already in finished state...");
+        return;
+    }
+    if(self.providerAnswerAction != nil)
+    {
+        DDLogInfo(@"Call is already being answered: %@", [self short]);
+        return;
+    }
+    DDLogVerbose(@"Requesting answer call transaction for %@", [self short]);
+    CXAnswerCallAction* answerCallAction = [[CXAnswerCallAction alloc] initWithCallUUID:self.uuid];
+    CXTransaction* transaction = [[CXTransaction alloc] initWithAction:answerCallAction];
+    [self.voipProcessor.callController requestTransaction:transaction completion:^(NSError* error) {
+        if(error != nil)
+        {
+            // Answer without CallKit if the system transaction is unavailable (common on Mac Catalyst).
+            DDLogError(@"Error requesting answer call transaction: %@", error);
+            self.providerAnswerAction = [[CXAnswerCallAction alloc] initWithCallUUID:self.uuid];
+            return;
+        }
+        DDLogInfo(@"Successfully created answer call transaction for CallKit..");
+    }];
+}
+
 -(void) end
 {
     if(self.isFinished)
@@ -440,11 +472,10 @@
         }
     }
     
-#ifdef IS_ALPHA
 #if TARGET_OS_MACCATALYST
-    //set audio session to default one
+    // CallKit does not reliably activate the audio session on Mac Catalyst.
+    // Use the shared session so WebRTC can play and record once the call connects.
     self.audioSession = [AVAudioSession sharedInstance];
-#endif
 #endif
 }
 -(BOOL) isConnected
@@ -463,10 +494,9 @@
             return;
         }
         BOOL assertActivated = YES;
-#ifdef IS_ALPHA
 #if TARGET_OS_MACCATALYST
+        // Mac Catalyst may re-assign the shared audio session; don't assert on that.
         assertActivated = NO;
-#endif
 #endif
         if(assertActivated && audioSession != nil)
             MLAssert(_audioSession == nil, @"Audio session should never be activated without deactivating old audio session first!", (@{

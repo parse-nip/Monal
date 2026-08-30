@@ -36,6 +36,7 @@ struct ContactDetails: View {
     @State private var showingDestroyConfirmation = false
     @State private var alertPrompt = AlertPrompt(dismissLabel: Text("Close"))
     @State private var showAlert = false
+    @State private var confirmationPrompt: ConfirmationPrompt?
     @State private var success = false
     @State private var successCallback: monal_void_block_t?
     @StateObject private var overlay = LoadingOverlayState()
@@ -182,17 +183,50 @@ struct ContactDetails: View {
                     }
                     .buttonStyle(.borderless)
                     
-//                     //TODO: wait for account edit to become swiftui
-//                     if contact.isSelf {
-//                         Button {
-//                             //TODO: open account edit
-//                         } label: {
-//                             Text("Open account settings")
-//                             .accessibilityHint("Open account settings")
-//                         }
-//                         .buttonStyle(.borderless)
-//                     }
-                    
+                    if HelperTools.shouldProvideVoip() && !contact.isMuc && !contact.isSelf {
+                        HStack(spacing: 40) {
+                            Button {
+                                if let prompt = requestOutgoingCall(to: contact.obj, callType: .audio) {
+                                    confirmationPrompt = prompt
+                                }
+                            } label: {
+                                VStack(spacing: 8) {
+                                    Image(systemName: "phone.fill")
+                                        .font(.title2)
+                                        .frame(width: 52, height: 52)
+                                        .foregroundColor(.white)
+                                        .background(Color.monalGreen)
+                                        .clipShape(Circle())
+                                    Text("Audio")
+                                        .font(.caption)
+                                        .foregroundColor(.primary)
+                                }
+                            }
+                            .buttonStyle(.borderless)
+                            .accessibilityLabel(Text("Audio call"))
+                            
+                            Button {
+                                if let prompt = requestOutgoingCall(to: contact.obj, callType: .video) {
+                                    confirmationPrompt = prompt
+                                }
+                            } label: {
+                                VStack(spacing: 8) {
+                                    Image(systemName: "video.fill")
+                                        .font(.title2)
+                                        .frame(width: 52, height: 52)
+                                        .foregroundColor(.white)
+                                        .background(Color.monalGreen)
+                                        .clipShape(Circle())
+                                    Text("Video")
+                                        .font(.caption)
+                                        .foregroundColor(.primary)
+                                }
+                            }
+                            .buttonStyle(.borderless)
+                            .accessibilityLabel(Text("Video call"))
+                        }
+                        .padding(.top, 8)
+                    }
                     
                     //only show account jid if more than one is configured
                     if MLXMPPManager.sharedInstance().connectedXMPP.count > 1 && !contact.isSelf {
@@ -676,6 +710,9 @@ struct ContactDetails: View {
         .tint(Color.primary)
         .addLoadingOverlay(overlay)
         .navigationBarTitle(contact.contactDisplayName as String, displayMode:.inline)
+        .actionSheet(isPresented: $confirmationPrompt.optionalMappedToBool()) {
+            ActionSheet(title: confirmationPrompt!.title, message: confirmationPrompt!.message, buttons: confirmationPrompt!.buttons)
+        }
         .alert(isPresented: $showAlert) {
             Alert(title: alertPrompt.title, message: alertPrompt.message, dismissButton:.default(Text("Close"), action: {
                 showAlert = false

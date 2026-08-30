@@ -775,28 +775,10 @@ struct ChatView: View {
                     }
                 }
                 
-                if !(contact.isMuc || contact.isSelf) {
+                if HelperTools.shouldProvideVoip() && !(contact.isMuc || contact.isSelf) {
                     Button {
-                        let activeChats = (UIApplication.shared.delegate as! MonalAppDelegate).activeChats!
-                        if voipProcessor.obj.getActiveCall(with:contact.obj) == nil && !DataLayer.sharedInstance().checkCap("urn:xmpp:jingle-message:0", forUser:contact.contactJid, onAccountID:contact.accountID) {
-                            confirmationPrompt = ConfirmationPrompt(
-                                title: Text("Missing Call Support"),
-                                message: Text("Your contact may not support calls. Your call might never reach its destination."),
-                                buttons: [
-                                    .default(
-                                        Text("Try nevertheless"),
-                                        action: {
-                                            activeChats.call(contact.obj, withUIKitSender:nil)
-                                        }
-                                    ),
-                                    .cancel(
-                                        Text("Cancel"),
-                                        action: { }
-                                    )
-                                ]
-                            )
-                        } else {
-                            activeChats.call(contact.obj, withUIKitSender:nil)
+                        if let prompt = requestOutgoingCall(to: contact.obj) {
+                            confirmationPrompt = prompt
                         }
                     } label: {
                         if (voipProcessor.activeCalls as [MLCall]).contains(where:{ $0.isEqual(to:contact.obj) }) {
@@ -805,6 +787,7 @@ struct ChatView: View {
                             Image(systemName: "phone.fill")
                         }
                     }
+                    .accessibilityLabel(Text("Call"))
                 }
                 
                 Button {
