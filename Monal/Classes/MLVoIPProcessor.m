@@ -312,6 +312,16 @@ static NSMutableDictionary* _pendingCalls;
     
     //add call to pending calls list
     [self addCall:call];
+
+#if TARGET_OS_MACCATALYST
+    // CallKit's incoming UI is easy to miss on Mac; show the in-app call screen immediately
+    // so the user can answer or decline from the app window.
+    dispatch_async(dispatch_get_main_queue(), ^{
+        MonalAppDelegate* appDelegate = (MonalAppDelegate*)[[UIApplication sharedApplication] delegate];
+        if(appDelegate.activeChats != nil)
+            [appDelegate.activeChats presentCall:call];
+    });
+#endif
     
     [self.cxProvider reportNewIncomingCallWithUUID:call.uuid update:[self constructUpdateForCall:call] completion:^(NSError *error) {
         //add our completion handler to handler queue to initiate xmpp connections
@@ -326,9 +336,24 @@ static NSMutableDictionary* _pendingCalls;
         if(error != nil)
         {
             DDLogError(@"Call disallowed by system: %@", error);
+#if TARGET_OS_MACCATALYST
+            // CallKit can refuse incoming calls on Mac Catalyst; keep the in-app UI and continue.
+            DDLogWarn(@"Continuing incoming call without CallKit on macOS...");
+            dispatch_async(dispatch_get_global_queue(DISPATCH_QUEUE_PRIORITY_DEFAULT, 0), ^{
+                DDLogDebug(@"Sending jmi ringing message...");
+                [call sendJmiRinging];
+                
+                while(call.account.accountState < kStateInitStarted)
+                    [NSThread sleepForTimeInterval:0.250];
+                
+                DDLogDebug(@"Account is connected, now really initialize WebRTC...");
+                [self initWebRTCForPendingCall:call];
+            });
+#else
             [call sendJmiReject];
             //remove this call from pending calls
             [self removeCall:call];
+#endif
         }
         else
         {

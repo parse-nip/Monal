@@ -734,6 +734,58 @@ struct ConfirmationPrompt {
     var buttons: [ActionSheet.Button] = []
 }
 
+/// Start an outgoing call, or return a confirmation prompt (missing support / call type).
+/// Pass a preferred `callType` to skip the audio/video picker.
+func requestOutgoingCall(to contact: MLContact, callType: MLCallType? = nil) -> ConfirmationPrompt? {
+    let appDelegate = UIApplication.shared.delegate as! MonalAppDelegate
+    guard let activeChats = appDelegate.activeChats else {
+        return nil
+    }
+
+    if let activeCall = appDelegate.voipProcessor?.getActiveCall(with: contact) {
+        activeChats.presentCall(activeCall)
+        return nil
+    }
+
+    let hasSupport = DataLayer.sharedInstance().checkCap("urn:xmpp:jingle-message:0", forUser: contact.contactJid, onAccountID: contact.accountID)
+    let start: (MLCallType) -> Void = { type in
+        activeChats.call(contact, with: type)
+    }
+
+    if let callType = callType {
+        if hasSupport {
+            start(callType)
+            return nil
+        }
+        return ConfirmationPrompt(
+            title: Text("Missing Call Support"),
+            message: Text("Your contact may not support calls. Your call might never reach its destination."),
+            buttons: [
+                .default(Text("Try nevertheless"), action: { start(callType) }),
+                .cancel()
+            ]
+        )
+    }
+
+    let typeButtons: [ActionSheet.Button] = [
+        .default(Text("Audio"), action: { start(.audio) }),
+        .default(Text("Video"), action: { start(.video) }),
+        .cancel()
+    ]
+    if hasSupport {
+        return ConfirmationPrompt(
+            title: Text("Call Type"),
+            message: Text("What call do you want to place?"),
+            buttons: typeButtons
+        )
+    }
+    return ConfirmationPrompt(
+        title: Text("Missing Call Support"),
+        message: Text("Your contact may not support calls. Your call might never reach its destination."),
+        buttons: typeButtons
+    )
+}
+
 extension View {
     /// Applies the given transform.
     ///

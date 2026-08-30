@@ -55,6 +55,7 @@ struct RTCVideoContainerView: UIViewRepresentable {
 struct DraggablePiPVideoView<StackedView: View>: View {
 
     let videoView: RTCMTLVideoView
+    let containerSize: CGSize
     let topPadding: CGFloat
     let rightPadding: CGFloat
     @Binding var controlsVisible: Bool
@@ -67,6 +68,7 @@ struct DraggablePiPVideoView<StackedView: View>: View {
     
     init(
         videoView: RTCMTLVideoView,
+        containerSize: CGSize,
         topPadding: CGFloat,
         rightPadding: CGFloat,
         controlsVisible: Binding<Bool>,
@@ -74,6 +76,7 @@ struct DraggablePiPVideoView<StackedView: View>: View {
         onDoubleTap: @escaping () -> Void
     ) {
         self.videoView = videoView
+        self.containerSize = containerSize
         self.topPadding = topPadding
         self.rightPadding = rightPadding
         self._controlsVisible = controlsVisible
@@ -82,16 +85,16 @@ struct DraggablePiPVideoView<StackedView: View>: View {
     }
     
     var body: some View {
-        //size of our video
-        let width = UIScreen.main.bounds.size.width / 3.0
+        //size of our video — cap the PiP so it stays readable on large Mac windows
+        let width = min(containerSize.width / 3.0, 220)
         let height = width / observer.aspectRatio
 
-        let initialX = (UIScreen.main.bounds.size.width - width) / 2 - rightPadding
-        let initialY = -(UIScreen.main.bounds.size.height - height) / 2 + topPadding
+        let initialX = (containerSize.width - width) / 2 - rightPadding
+        let initialY = -(containerSize.height - height) / 2 + topPadding
         
         //used for clamping
-        let minX = -(UIScreen.main.bounds.size.width + width) / 2 + rightPadding * 2
-        let maxY = (UIScreen.main.bounds.size.height - height) - topPadding * 2
+        let minX = -(containerSize.width + width) / 2 + rightPadding * 2
+        let maxY = (containerSize.height - height) - topPadding * 2
 
         ZStack {
             RTCVideoContainerView(
@@ -144,9 +147,27 @@ struct AVCallUI: View {
     @State private var videoRenderingStarted = false
     
     //2 times 32px space between buttons and 16px left and right padding of whole button bar
-    private let maxButtonSize = (UIScreen.main.bounds.size.width - 3*32) / 3.0
-    //only 1/3 of the size of our DraggablePiPVideoView, which is 1/3 of the screen width
-    private let maxCameraSwitchButtonSize = (UIScreen.main.bounds.size.width / 3.0) / 3.0
+    private var maxButtonSize: CGFloat {
+        min((UIScreen.main.bounds.size.width - 3*32) / 3.0, 72)
+    }
+    //only 1/3 of the size of our DraggablePiPVideoView
+    private var maxCameraSwitchButtonSize: CGFloat {
+        min((min(UIScreen.main.bounds.size.width, 660) / 3.0) / 3.0, 36)
+    }
+    private var maxAvatarSize: CGFloat {
+#if targetEnvironment(macCatalyst)
+        return 180
+#else
+        return size2048px
+#endif
+    }
+    private var micPermissionMessage: String {
+#if targetEnvironment(macCatalyst)
+        return NSLocalizedString("You need to grant microphone access in System Settings → Privacy & Security → Microphone if you want others to hear you.", comment: "")
+#else
+        return NSLocalizedString("You need to grant microphone access in iOS Settings-> Privacy-> Microphone, if you want that others can hear you.", comment: "")
+#endif
+    }
     @ScaledMetric(relativeTo:.body) private var size32px: CGFloat = 32
     @ScaledMetric(relativeTo:.body) private var size20px: CGFloat = 20
     @ScaledMetric(relativeTo:.body) private var size28px: CGFloat = 28
@@ -397,6 +418,22 @@ struct AVCallUI: View {
     }
     
     @ViewBuilder
+    func answerButtonView() -> some View {
+        Button(action: {
+            call.obj.answer()
+        }) {
+            Image(systemName: "phone.circle.fill")
+                .resizable()
+                .frame(width: min(size64px, maxButtonSize), height: min(size64px, maxButtonSize))
+                .symbolRenderingMode(.palette)
+                .foregroundStyle(.white, .green)
+                .shadow(radius: size7px)
+        }
+        .buttonStyle(BorderlessButtonStyle())
+        .accessibilityLabel(Text("Answer call"))
+    }
+    
+    @ViewBuilder
     func endcallButtonView() -> some View {
         Button(action: {
             call.obj.end()
@@ -410,6 +447,7 @@ struct AVCallUI: View {
                 .shadow(radius: size7px)
         }
         .buttonStyle(BorderlessButtonStyle())
+        .accessibilityLabel(Text("End call"))
     }
     
     @ViewBuilder
@@ -461,6 +499,7 @@ struct AVCallUI: View {
     }
     
     var body: some View {
+        GeometryReader { geometry in
         ZStack {
             Color.background
                 .ignoresSafeArea()
@@ -471,10 +510,12 @@ struct AVCallUI: View {
                 
                 DraggablePiPVideoView(
                     videoView: self.localRenderer,
+                    containerSize: geometry.size,
                     topPadding: 48,
                     rightPadding: 20,
                     controlsVisible: $controlsVisible,
                     stackedView: {
+#if !targetEnvironment(macCatalyst)
                         Button(action: {
                             if cameraPosition == .front {
                                 cameraPosition = .back
@@ -494,6 +535,7 @@ struct AVCallUI: View {
                                 .clipShape(Circle())
                         }
                         .buttonStyle(.plain)
+#endif
                     }, onDoubleTap: {
                         if sendingVideo {
                             call.obj.hideVideo()
@@ -558,9 +600,15 @@ struct AVCallUI: View {
                                 .bold()
                                 .foregroundColor(.primary)
                             case .ringing:
-                                Text("Ringing...")
-                                .bold()
-                                .foregroundColor(.primary)
+                                if MLCallDirection(rawValue:call.direction) == .incoming {
+                                    Text("Incoming call...")
+                                    .bold()
+                                    .foregroundColor(.primary)
+                                } else {
+                                    Text("Ringing...")
+                                    .bold()
+                                    .foregroundColor(.primary)
+                                }
                             case .connecting:
                                 Text("Connecting...")
                                 .bold()
@@ -645,10 +693,10 @@ struct AVCallUI: View {
                                 .frame(
                                     minWidth:       size32px,
                                     idealWidth:     size150px,
-                                    maxWidth:       size2048px,
+                                    maxWidth:       maxAvatarSize,
                                     minHeight:      size32px,
                                     idealHeight:    size150px,
-                                    maxHeight:      size2048px,
+                                    maxHeight:      maxAvatarSize,
                                     alignment:      .center
                                 )
                                 .scaledToFit()
@@ -668,6 +716,14 @@ struct AVCallUI: View {
                             closeButtonView()
                             Spacer()
                         }
+                    } else if MLCallDirection(rawValue:call.direction) == .incoming && MLCallState(rawValue:call.state) == .ringing {
+                        HStack() {
+                            Spacer()
+                            endcallButtonView()
+                            Spacer().frame(width: 64)
+                            answerButtonView()
+                            Spacer()
+                        }
                     } else {
                         HStack() {
                             Spacer()
@@ -679,10 +735,12 @@ struct AVCallUI: View {
                             
                             endcallButtonView()
                             
+#if !targetEnvironment(macCatalyst)
                             if MLCallState(rawValue:call.state) == .connected || MLCallState(rawValue:call.state) == .reconnecting {
                                 Spacer().frame(width: 32)
                                 speakerButtonView()
                             }
+#endif
                             
                             Spacer()
                         }
@@ -692,13 +750,14 @@ struct AVCallUI: View {
                 }
             }
         }
+        }
         .onTapGesture(count: 1) {
             controlsVisible = !controlsVisible
         }
         .alert(isPresented: $showMicAlert) {
             Alert(
                 title: Text("Missing permission"),
-                message: Text("You need to grant microphone access in iOS Settings-> Privacy-> Microphone, if you want that others can hear you."),
+                message: Text(micPermissionMessage),
                 dismissButton: .default(Text("OK"))
             )
         }
@@ -739,9 +798,11 @@ struct AVCallUI: View {
             }
         }
         .onAppear {
+#if !targetEnvironment(macCatalyst)
             //force portrait mode and lock ui there
             self.appDelegate.obj.orientationLock = .portrait
             UIApplication.shared.isIdleTimerDisabled = true
+#endif
             
             self.ringingPlayer.numberOfLoops = -1
             self.busyPlayer.numberOfLoops = 6
@@ -754,12 +815,19 @@ struct AVCallUI: View {
                 }
             }
             
+            if MLCallType(rawValue:call.callType) == .video {
+                AVCaptureDevice.requestAccess(for: .video) { _ in }
+            }
+            
+            handleStateChange(call.obj.state, appDelegate.obj.audioState)
             maybeStartRenderer()
         }
         .onDisappear {
+#if !targetEnvironment(macCatalyst)
             //allow all orientations again
             self.appDelegate.obj.orientationLock = .all
             UIApplication.shared.isIdleTimerDisabled = false
+#endif
             
             ringingPlayer.stop()
             busyPlayer.stop()
