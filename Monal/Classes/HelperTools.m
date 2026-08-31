@@ -62,6 +62,7 @@ extern int64_t kscrs_getNextCrashReport(char* crashReportPathBuffer);
 #import <monalxmpp/Quicksy_Country.h>
 #import "secrets.h"
 
+@import Security;
 @import UserNotifications;
 @import CoreImage;
 @import CoreImage.CIFilterBuiltins;
@@ -120,6 +121,64 @@ static volatile void (*_oldExceptionHandler)(NSException*) = NULL;
 #if TARGET_OS_MACCATALYST
 static objc_exception_preprocessor _oldExceptionPreprocessor = NULL;
 #endif
+
+// Ad-hoc / unsigned local builds cannot use app groups or keychain-access-groups.
+static BOOL MLHasApplicationGroupEntitlement(void)
+{
+    static BOOL hasEntitlement;
+    static dispatch_once_t onceToken;
+    dispatch_once(&onceToken, ^{
+        SecTaskRef task = SecTaskCreateFromSelf(NULL);
+        if(task == NULL)
+        {
+            hasEntitlement = NO;
+            return;
+        }
+        CFErrorRef error = NULL;
+        CFTypeRef value = SecTaskCopyValueForEntitlement(task, CFSTR("com.apple.security.application-groups"), &error);
+        CFRelease(task);
+        if(error != NULL)
+            CFRelease(error);
+        hasEntitlement = (value != NULL);
+        if(value != NULL)
+            CFRelease(value);
+    });
+    return hasEntitlement;
+}
+
+static NSUUID* MLFallbackDeviceUUID(BOOL createIfMissing)
+{
+    NSURL* fileURL = [HelperTools getContainerURLForPathComponents:@[@"deviceUUID.txt"]];
+    NSString* stored = [NSString stringWithContentsOfURL:fileURL encoding:NSUTF8StringEncoding error:nil];
+    stored = [stored stringByTrimmingCharactersInSet:[NSCharacterSet whitespaceAndNewlineCharacterSet]];
+    if(stored.length > 0)
+    {
+        NSUUID* uuid = [[NSUUID alloc] initWithUUIDString:stored];
+        if(uuid != nil)
+            return uuid;
+    }
+    if(!createIfMissing)
+        return nil;
+    NSUUID* created = [NSUUID UUID];
+    [created.UUIDString writeToURL:fileURL atomically:YES encoding:NSUTF8StringEncoding error:nil];
+    return created;
+}
+
+static NSURL* MLAccountPasswordFallbackURL(void)
+{
+    return [HelperTools getContainerURLForPathComponents:@[@"local-account-passwords.plist"]];
+}
+
+static NSMutableDictionary* MLLoadAccountPasswordFallback(void)
+{
+    NSDictionary* stored = [NSDictionary dictionaryWithContentsOfURL:MLAccountPasswordFallbackURL()];
+    return stored != nil ? [stored mutableCopy] : [NSMutableDictionary new];
+}
+
+static void MLSaveAccountPasswordFallback(NSDictionary* dict)
+{
+    [dict writeToURL:MLAccountPasswordFallbackURL() error:nil];
+}
 
 //shamelessly stolen from utils.ip in conversations source
 static NSRegularExpression* IPV4;
@@ -1024,7 +1083,14 @@ static void notification_center_logging(CFNotificationCenterRef center, void* ob
     static NSURL* containerUrl;
     static dispatch_once_t onceToken;
     dispatch_once(&onceToken, ^{
-        containerUrl = [[NSFileManager defaultManager] containerURLForSecurityApplicationGroupIdentifier:kAppGroup];
+        if(MLHasApplicationGroupEntitlement())
+            containerUrl = [[NSFileManager defaultManager] containerURLForSecurityApplicationGroupIdentifier:kAppGroup];
+        if(containerUrl == nil)
+        {
+            containerUrl = [[[NSFileManager defaultManager] URLsForDirectory:NSApplicationSupportDirectory inDomains:NSUserDomainMask] firstObject];
+            containerUrl = [containerUrl URLByAppendingPathComponent:@"Monal" isDirectory:YES];
+            [[NSFileManager defaultManager] createDirectoryAtURL:containerUrl withIntermediateDirectories:YES attributes:nil error:nil];
+        }
     });
     MLAssert(containerUrl != nil, @"Container URL should never be nil!");
     NSURL* retval = containerUrl;
@@ -2155,7 +2221,10 @@ static void notification_center_logging(CFNotificationCenterRef center, void* ob
     static NSUserDefaults* db;
     static dispatch_once_t onceToken;
     dispatch_once(&onceToken, ^{
-        db = [[NSUserDefaults alloc] initWithSuiteName:kAppGroup];
+        if(MLHasApplicationGroupEntitlement())
+            db = [[NSUserDefaults alloc] initWithSuiteName:kAppGroup];
+        else
+            db = [NSUserDefaults standardUserDefaults];
     });
     return db;
 }
@@ -2867,8 +2936,12 @@ static void notification_center_logging(CFNotificationCenterRef center, void* ob
     NSString* deviceUUID = [SAMKeychain passwordForService:kMonalDeviceUUIDKeychainName account:kDeviceUUIDKeychainAccount error:&error];
     if(error)
     {
-        //should never trigger, since all relevant entry points into our framework call deviceUUIDAccessibleOrAllowedEmpty upon start
-        MLAssert(error.code == errSecItemNotFound, @"Unexpected keychain error!", (@{@"error": error}));
+        if(error.code != errSecItemNotFound)
+        {
+            NSUUID* fallback = MLFallbackDeviceUUID(YES);
+            DDLogWarn(@"Unexpected keychain error, using fallback device UUID %@: %@", fallback, error);
+            return fallback;
+        }
         
         //The keychain is empty (due to a device migration for example)
         DDLogInfo(@"Keychain item storing the device UUID not found, regenerating it: %@", error);
@@ -2889,9 +2962,13 @@ static void notification_center_logging(CFNotificationCenterRef center, void* ob
             [SAMKeychain setPassword:[newDeviceUUID UUIDString] forService:kMonalDeviceUUIDKeychainName account:kDeviceUUIDKeychainAccount error:&deviceUUIDSavingError];
         }
         
-        //don't proceed if the new uuid could not be saved or something else isn't stable
-        //(we don't want to spuriously generate new omemo keys/identities!)
-        MLAssert(deviceUUIDSavingError == nil, @"Failed to save the device UUID in the keychain", (@{@"error": deviceUUIDSavingError}));
+        if(deviceUUIDSavingError != nil)
+        {
+            NSURL* fileURL = [HelperTools getContainerURLForPathComponents:@[@"deviceUUID.txt"]];
+            [newDeviceUUID.UUIDString writeToURL:fileURL atomically:YES encoding:NSUTF8StringEncoding error:nil];
+            DDLogWarn(@"Failed to save the device UUID in the keychain, using file fallback %@: %@", newDeviceUUID, deviceUUIDSavingError);
+            return newDeviceUUID;
+        }
         NSUUID* retrieved = [self deviceUUID];
         MLAssert([retrieved isEqual:newDeviceUUID], @"Failed to retrive newly stored device UUID!", (@{@"retrieved": retrieved, @"stored": newDeviceUUID}));
         
@@ -2905,7 +2982,51 @@ static void notification_center_logging(CFNotificationCenterRef center, void* ob
 {
     NSError* error;
     [SAMKeychain passwordForService:kMonalDeviceUUIDKeychainName account:kDeviceUUIDKeychainAccount error:&error];
-    return error == nil || (allowed && error.code == errSecItemNotFound);
+    if(error == nil || (allowed && error.code == errSecItemNotFound))
+        return YES;
+    return MLFallbackDeviceUUID(NO) != nil || allowed;
+}
+
++(BOOL) storeAccountPassword:(NSString*) password forAccountID:(NSNumber*) accountID
+{
+    NSError* error;
+    BOOL saved = NO;
+    @synchronized(kSAMKeychainErrorDomain) {
+        [SAMKeychain setAccessibilityType:kSecAttrAccessibleAfterFirstUnlock];
+        saved = [SAMKeychain setPassword:password forService:kMonalKeychainName account:accountID.stringValue error:&error];
+    }
+    if(saved)
+        return YES;
+
+    NSMutableDictionary* fallback = MLLoadAccountPasswordFallback();
+    fallback[accountID.stringValue] = password;
+    MLSaveAccountPasswordFallback(fallback);
+    DDLogWarn(@"Keychain password save failed for account %@, using file fallback: %@", accountID, error);
+    return YES;
+}
+
++(NSString*) loadAccountPasswordForAccountID:(NSNumber*) accountID error:(NSError**) error
+{
+    NSError* keychainError;
+    NSString* password = [SAMKeychain passwordForService:kMonalKeychainName account:accountID.stringValue error:&keychainError];
+    if(password != nil)
+        return password;
+
+    NSString* fallback = MLLoadAccountPasswordFallback()[accountID.stringValue];
+    if(fallback.length > 0)
+        return fallback;
+
+    if(error != NULL)
+        *error = keychainError;
+    return nil;
+}
+
++(void) removeAccountPasswordForAccountID:(NSNumber*) accountID
+{
+    [SAMKeychain deletePasswordForService:kMonalKeychainName account:accountID.stringValue];
+    NSMutableDictionary* fallback = MLLoadAccountPasswordFallback();
+    [fallback removeObjectForKey:accountID.stringValue];
+    MLSaveAccountPasswordFallback(fallback);
 }
 
 +(NSNumber*) currentTimestampInSeconds

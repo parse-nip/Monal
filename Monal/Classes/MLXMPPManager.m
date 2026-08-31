@@ -562,7 +562,7 @@ static const int pingFreqencyMinutes = 5;       //about the same Conversations u
 
     NSError* error;
     NSString* jid = [NSString stringWithFormat:@"%@@%@", account[kUsername], account[kDomain]];
-    NSString* password = [SAMKeychain passwordForService:kMonalKeychainName account:((NSNumber*)account[kAccountID]).stringValue error:&error];
+    NSString* password = [HelperTools loadAccountPasswordForAccountID:account[kAccountID] error:&error];
     if(error)
     {
         DDLogError(@"Keychain error: %@", error);
@@ -699,23 +699,20 @@ static const int pingFreqencyMinutes = 5;       //about the same Conversations u
 
 -(void) updatePassword:(NSString*) password forAccount:(NSNumber*) accountID
 {
-    @synchronized(kSAMKeychainErrorDomain) {
-        [SAMKeychain setAccessibilityType:kSecAttrAccessibleAfterFirstUnlock];
-        [SAMKeychain setPassword:password forService:kMonalKeychainName account:accountID.stringValue];
-    }
+    [HelperTools storeAccountPassword:password forAccountID:accountID];
     xmpp* xmpp = [self getEnabledAccountForID:accountID];
     [xmpp.connectionProperties.identity updatPassword:password];
 }
 
 -(BOOL) isValidPassword:(NSString*) password forAccount:(NSNumber*) accountID
 {
-    return [password isEqualToString:[SAMKeychain passwordForService:kMonalKeychainName account:accountID.stringValue]];
+    return [password isEqualToString:[HelperTools loadAccountPasswordForAccountID:accountID error:nil]];
 }
 
 //this is only used by quicksy
 -(NSString*) getPasswordForAccount:(NSNumber*) accountID
 {
-    return [SAMKeychain passwordForService:kMonalKeychainName account:accountID.stringValue];
+    return [HelperTools loadAccountPasswordForAccountID:accountID error:nil];
 }
 
 #pragma mark -  XMPP commands
@@ -860,10 +857,7 @@ static const int pingFreqencyMinutes = 5;       //about the same Conversations u
 {
     if(accountID != nil && password != nil)
     {
-        @synchronized(kSAMKeychainErrorDomain) {
-            [SAMKeychain setAccessibilityType:kSecAttrAccessibleAfterFirstUnlock];
-            [SAMKeychain setPassword:password forService:kMonalKeychainName account:accountID.stringValue];
-        }
+        [HelperTools storeAccountPassword:password forAccountID:accountID];
         [self connectAccount:accountID];
     }
 }
@@ -872,7 +866,7 @@ static const int pingFreqencyMinutes = 5;       //about the same Conversations u
 {
     [self disconnectAccount:accountID withExplicitLogout:YES];
     [[DataLayer sharedInstance] removeAccount:accountID];
-    [SAMKeychain deletePasswordForService:kMonalKeychainName account:accountID.stringValue];
+    [HelperTools removeAccountPasswordForAccountID:accountID];
     [HelperTools removeAllShareInteractionsForAccountID:accountID];
     // trigger UI removal
     [[MLNotificationQueue currentQueue] postNotificationName:kMonalRefresh object:nil userInfo:nil];

@@ -187,7 +187,7 @@ enum DummySettingsRows {
         MLAssert(settings != nil, @"Settings dict should never be nil here!");
 
         self.jid = [NSString stringWithFormat:@"%@@%@", [settings objectForKey:@"username"], [settings objectForKey:@"domain"]];
-        NSString* pass = [SAMKeychain passwordForService:kMonalKeychainName account:self.accountID.stringValue];
+        NSString* pass = [HelperTools loadAccountPasswordForAccountID:self.accountID error:nil];
 
         if(pass)
             self.password = pass;
@@ -293,7 +293,7 @@ enum DummySettingsRows {
     //check if our keychain contains a password
     if(self.enabled && self.password.length == 0)
     {
-        [SAMKeychain passwordForService:kMonalKeychainName account:self.accountID.stringValue error:&error];
+        [HelperTools loadAccountPasswordForAccountID:self.accountID error:&error];
         if(error != nil)
         {
             DDLogError(@"Keychain error: %@", error);
@@ -362,10 +362,7 @@ enum DummySettingsRows {
                 if(accountID != nil)
                 {
                     self.accountID = accountID;
-                    @synchronized(kSAMKeychainErrorDomain) {
-                        [SAMKeychain setAccessibilityType:kSecAttrAccessibleAfterFirstUnlock];
-                        [SAMKeychain setPassword:self.password forService:kMonalKeychainName account:self.accountID.stringValue];
-                    }
+                    [HelperTools storeAccountPassword:self.password forAccountID:self.accountID];
                     if(self.enabled)
                     {
                         DDLogVerbose(@"Now connecting newly created account: %@", self.accountID);

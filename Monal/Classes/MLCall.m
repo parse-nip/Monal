@@ -68,6 +68,8 @@
 
 @property (nonatomic, readonly) xmpp* account;
 @property (nonatomic, strong) MLVoIPProcessor* voipProcessor;
+
+-(void) endLocally;
 @end
 
 //this is private and only shared to this class
@@ -215,6 +217,12 @@
         DDLogInfo(@"Call is already being answered: %@", [self short]);
         return;
     }
+#if TARGET_OS_MACCATALYST
+    // CallKit answer transactions often never invoke performAnswerCallAction on Mac.
+    // Start the in-app accept immediately so JMI proceed / WebRTC can run.
+    DDLogInfo(@"Answering incoming call without CallKit on macOS: %@", [self short]);
+    self.providerAnswerAction = [[CXAnswerCallAction alloc] initWithCallUUID:self.uuid];
+#else
     DDLogVerbose(@"Requesting answer call transaction for %@", [self short]);
     CXAnswerCallAction* answerCallAction = [[CXAnswerCallAction alloc] initWithCallUUID:self.uuid];
     CXTransaction* transaction = [[CXTransaction alloc] initWithAction:answerCallAction];
@@ -228,6 +236,7 @@
         }
         DDLogInfo(@"Successfully created answer call transaction for CallKit..");
     }];
+#endif
 }
 
 -(void) end
@@ -237,6 +246,10 @@
         DDLogInfo(@"Not requesting end call action: call already in finished state...");
         return;
     }
+#if TARGET_OS_MACCATALYST
+    DDLogInfo(@"Ending call without CallKit on macOS: %@", [self short]);
+    [self endLocally];
+#else
     DDLogVerbose(@"Requesting end call transaction for %@", [self short]);
     CXEndCallAction* endCallAction = [[CXEndCallAction alloc] initWithCallUUID:self.uuid];
     CXTransaction* transaction = [[CXTransaction alloc] initWithAction:endCallAction];
@@ -245,12 +258,37 @@
         {
             //try to do this "manually" without looping through callkit
             DDLogError(@"Error requesting end call transaction: %@", error);
-            [self internalHandleEndCallActionWithReason:MLCallFinishReasonUnknown];
+            [self endLocally];
             return;
         }
         else
             DDLogInfo(@"Successfully created end call transaction for CallKit..");
     }];
+#endif
+}
+
+-(void) endLocally
+{
+    if(self.isFinished)
+        return;
+    if(self.direction == MLCallDirectionIncoming)
+    {
+        if(self.isConnected)
+            [self handleEndCallActionWithReason:MLCallFinishReasonNormal];
+        else if(self.jmiProceed != nil)
+            [self handleEndCallActionWithReason:MLCallFinishReasonConnectivityError];
+        else
+            [self handleEndCallActionWithReason:MLCallFinishReasonDeclined];
+    }
+    else
+    {
+        if(self.isConnected)
+            [self handleEndCallActionWithReason:MLCallFinishReasonNormal];
+        else if(self.jmiProceed != nil)
+            [self handleEndCallActionWithReason:MLCallFinishReasonConnectivityError];
+        else
+            [self handleEndCallActionWithReason:MLCallFinishReasonRetracted];
+    }
 }
 
 -(void) delayedEnd:(double) delay withDisconnectedState:(BOOL) disconnected
@@ -420,8 +458,9 @@
 -(void) setProviderAnswerAction:(CXAnswerCallAction*) action
 {
     @synchronized(self) {
+        BOOL alreadyAnswering = _providerAnswerAction != nil;
         _providerAnswerAction = action;
-        if(self.direction == MLCallDirectionIncoming && self.webRTCClient != nil)
+        if(!alreadyAnswering && self.direction == MLCallDirectionIncoming && self.webRTCClient != nil)
             [self establishIncomingConnection];
     }
 }
@@ -551,6 +590,12 @@
     [[RTCAudioSession sharedInstance] audioSessionDidActivate:audioSession];
     [[RTCAudioSession sharedInstance] setIsAudioEnabled:YES];
     [[RTCAudioSession sharedInstance] unlockForConfiguration];
+#if TARGET_OS_MACCATALYST
+    dispatch_async(dispatch_get_main_queue(), ^{
+        MonalAppDelegate* appDelegate = (MonalAppDelegate*)[[UIApplication sharedApplication] delegate];
+        appDelegate.audioState = MLAudioStateCall;
+    });
+#endif
     if(self.callType == MLCallTypeVideo)
     {
         DDLogInfo(@"*** Video call detected, activating speaker in 500ms...");
@@ -568,6 +613,13 @@
     [[RTCAudioSession sharedInstance] audioSessionDidDeactivate:audioSession];
     [[RTCAudioSession sharedInstance] setIsAudioEnabled:NO];
     [[RTCAudioSession sharedInstance] unlockForConfiguration];
+#if TARGET_OS_MACCATALYST
+    dispatch_async(dispatch_get_main_queue(), ^{
+        [HelperTools configureDefaultAudioSession];
+        MonalAppDelegate* appDelegate = (MonalAppDelegate*)[[UIApplication sharedApplication] delegate];
+        appDelegate.audioState = MLAudioStateNormal;
+    });
+#endif
 }
 
 -(void) reportRinging

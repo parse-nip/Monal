@@ -743,7 +743,8 @@ func requestOutgoingCall(to contact: MLContact, callType: MLCallType? = nil) -> 
     }
 
     if let activeCall = appDelegate.voipProcessor?.getActiveCall(with: contact) {
-        activeChats.presentCall(activeCall)
+        // Xcode 26.6 overlays treat presentCall as a renamed UIKit API (present(_:)).
+        activeChats.perform(NSSelectorFromString("presentCall:"), with: activeCall)
         return nil
     }
 
