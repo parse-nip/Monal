@@ -222,8 +222,7 @@
     // Start the in-app accept immediately so JMI proceed / WebRTC can run.
     DDLogInfo(@"Answering incoming call without CallKit on macOS: %@", [self short]);
     self.providerAnswerAction = [[CXAnswerCallAction alloc] initWithCallUUID:self.uuid];
-    return;
-#endif
+#else
     DDLogVerbose(@"Requesting answer call transaction for %@", [self short]);
     CXAnswerCallAction* answerCallAction = [[CXAnswerCallAction alloc] initWithCallUUID:self.uuid];
     CXTransaction* transaction = [[CXTransaction alloc] initWithAction:answerCallAction];
@@ -237,6 +236,7 @@
         }
         DDLogInfo(@"Successfully created answer call transaction for CallKit..");
     }];
+#endif
 }
 
 -(void) end
@@ -249,8 +249,7 @@
 #if TARGET_OS_MACCATALYST
     DDLogInfo(@"Ending call without CallKit on macOS: %@", [self short]);
     [self endLocally];
-    return;
-#endif
+#else
     DDLogVerbose(@"Requesting end call transaction for %@", [self short]);
     CXEndCallAction* endCallAction = [[CXEndCallAction alloc] initWithCallUUID:self.uuid];
     CXTransaction* transaction = [[CXTransaction alloc] initWithAction:endCallAction];
@@ -265,6 +264,7 @@
         else
             DDLogInfo(@"Successfully created end call transaction for CallKit..");
     }];
+#endif
 }
 
 -(void) endLocally
